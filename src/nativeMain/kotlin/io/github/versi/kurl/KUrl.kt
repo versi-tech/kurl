@@ -6,12 +6,26 @@ import io.github.versi.kurl.curl.*
 import kotlinx.cinterop.*
 import platform.posix.size_t
 
+private const val MAX_CACHED_CONNECTS_COUNT = 5L
+
+@SharedImmutable
+private val mutex = KUrlMutex(mutexesCount = MAX_CACHED_CONNECTS_COUNT)
+
 class KUrl(
     private val url: String,
     val dataBuffer: KUrlResponseDataBuffer,
     userAgent: String? = null,
-    timeoutInSeconds: Long = 15
+    timeoutInSeconds: Long = 15,
+    withCacheEnabled: Boolean = true
 ) {
+
+    private val curlShare: COpaquePointer? = if (withCacheEnabled) {
+        KUrl.curlShare
+    } else null
+
+    companion object {
+        private val curlShare: COpaquePointer? = curl_share_init()
+    }
 
     val headerBuffer = KUrlStringBuffer()
 
@@ -20,6 +34,22 @@ class KUrl(
     private val memScope = MemScope()
 
     init {
+        /**
+         * Based on:
+         * https://everything.curl.dev/libcurl/sharing
+         * https://everything.curl.dev/libcurl/caches#connection-cache
+         * https://curl.se/libcurl/c/shared-connection-cache.html
+         * https://curl.se/libcurl/c/threaded-shared-conn.html
+         */
+        // TODO: consider implementing additional SSL caching support: https://curl.se/libcurl/c/threaded-ssl.html
+        curlShare?.let {
+            val shareLock = staticCFunction(::shareLock)
+            val shareUnlock = staticCFunction(::shareUnlock)
+            curl_easy_setopt(curl, CURLOPT_MAXCONNECTS, MAX_CACHED_CONNECTS_COUNT)
+            curl_share_setopt(it, CURLSHoption.CURLSHOPT_SHARE, CURL_LOCK_DATA_CONNECT)
+            curl_share_setopt(it, CURLSHoption.CURLSHOPT_LOCKFUNC, shareLock)
+            curl_share_setopt(it, CURLSHoption.CURLSHOPT_UNLOCKFUNC, shareUnlock)
+        }
         curl_easy_setopt(curl, CURLOPT_URL, url)
         val header = staticCFunction(::headerCallback)
         curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header)
@@ -50,6 +80,9 @@ class KUrl(
             curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headersList)
         }
 
+        curlShare?.let {
+            curl_easy_setopt(curl, CURLOPT_SHARE, it)
+        }
         val res = curl_easy_perform(curl)
         if (headers.isNotEmpty()) {
             curl_slist_free_all(headersList)
@@ -71,7 +104,12 @@ class KUrl(
     }
 }
 
-fun headerCallback(buffer: CPointer<ByteVar>?, size: size_t, numberOfItems: size_t, userdata: COpaquePointer?): size_t {
+fun headerCallback(
+    buffer: CPointer<ByteVar>?,
+    size: size_t,
+    numberOfItems: size_t,
+    userdata: COpaquePointer?
+): size_t {
     userdata?.let {
         val curl = userdata.asStableRef<KUrl>().get()
         return readCallbackData(buffer, size, numberOfItems, curl.headerBuffer)
@@ -79,7 +117,12 @@ fun headerCallback(buffer: CPointer<ByteVar>?, size: size_t, numberOfItems: size
     return 0u
 }
 
-fun writeCallback(buffer: CPointer<ByteVar>?, size: size_t, numberOfItems: size_t, userdata: COpaquePointer?): size_t {
+fun writeCallback(
+    buffer: CPointer<ByteVar>?,
+    size: size_t,
+    numberOfItems: size_t,
+    userdata: COpaquePointer?
+): size_t {
     userdata?.let {
         val curl = userdata.asStableRef<KUrl>().get()
         return readCallbackData(buffer, size, numberOfItems, curl.dataBuffer)
@@ -97,6 +140,24 @@ fun readCallbackData(
     val dataSize = (size * numberOfItems).toInt()
     dataBuffer.insertChunk(buffer, dataSize)
     return size * numberOfItems
+}
+
+fun shareLock(
+    handle: COpaquePointer?,
+    data: curl_lock_data,
+    access: curl_lock_access,
+    userdata: COpaquePointer?
+) {
+    mutex.lock(data.toInt())
+}
+
+fun shareUnlock(
+    buffer: COpaquePointer?,
+    data: curl_lock_data,
+    access: curl_lock_access,
+    userdata: COpaquePointer?
+) {
+    mutex.unlock(data.toInt())
 }
 
 class CUrlException(override val message: String) : Exception(message)
