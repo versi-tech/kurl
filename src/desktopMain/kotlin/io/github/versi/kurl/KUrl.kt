@@ -16,10 +16,10 @@ class KUrl(
     val dataBuffer: KUrlResponseDataBuffer,
     userAgent: String? = null,
     timeoutInSeconds: Long = 15,
-    withCacheEnabled: Boolean = true
+    withConnectionSharing: Boolean = false
 ) {
 
-    private val curlShare: COpaquePointer? = if (withCacheEnabled) {
+    private val curlShare: COpaquePointer? = if (withConnectionSharing) {
         KUrl.curlShare
     } else null
 
