@@ -1,6 +1,6 @@
 headers = curl/curl.h
 
 compilerOpts.linux = -I/usr/include -I/usr/include/x86_64-linux-gnu
-compilerOpts.osx = -I/usr/local/Cellar/curl/7.81.0/include/
-linkerOpts.osx = -L/usr/local/Cellar/curl/7.81.0/lib -lcurl
+compilerOpts.osx = -I/usr/local/Cellar/curl/7.81.0/include/ -I/usr/local/Cellar/curl/7.82.0/include/
+linkerOpts.osx = -L/usr/local/Cellar/curl/7.81.0/lib -L/usr/local/Cellar/curl/7.82.0/lib -lcurl
 linkerOpts.linux = -L/usr/lib/x86_64-linux-gnu -L/usr/lib -lcurl
