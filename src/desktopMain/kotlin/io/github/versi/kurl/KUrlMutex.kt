@@ -6,7 +6,7 @@ import kotlinx.cinterop.get
 import kotlinx.cinterop.ptr
 import platform.posix.*
 
-class KUrlMutex(memScope: MemScope = MemScope(), mutexesCount: Long) {
+class KUrlMutex(memScope: MemScope = MemScope(), mutexesCount: Int) {
 
     private val mutexes = memScope.allocArray<pthread_mutex_t>(mutexesCount).also {
         for (i in 0 until mutexesCount) {

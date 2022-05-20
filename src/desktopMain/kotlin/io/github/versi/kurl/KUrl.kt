@@ -9,7 +9,7 @@ import platform.posix.size_t
 private const val MAX_CACHED_CONNECTS_COUNT = 5L
 
 @SharedImmutable
-private val mutex = KUrlMutex(mutexesCount = MAX_CACHED_CONNECTS_COUNT)
+private val mutex = KUrlMutex(mutexesCount = CURL_LOCK_DATA_LAST.toInt())
 
 class KUrl(
     private val url: String,
@@ -24,7 +24,26 @@ class KUrl(
     } else null
 
     companion object {
-        private val curlShare: COpaquePointer? = curl_share_init()
+        init {
+            curl_global_init(CURL_GLOBAL_ALL.toLong())
+        }
+
+        /**
+         * Based on:
+         * https://everything.curl.dev/libcurl/sharing
+         * https://everything.curl.dev/libcurl/caches#connection-cache
+         * https://curl.se/libcurl/c/shared-connection-cache.html
+         * https://curl.se/libcurl/c/threaded-shared-conn.html
+         * https://gist.github.com/bagder/7eccf74f8b6d70b5abefeb7f288dba9b
+         */
+        // TODO: consider implementing additional SSL caching support: https://curl.se/libcurl/c/threaded-ssl.html
+        private val curlShare: COpaquePointer? = curl_share_init().also {
+            it?.let {
+                curl_share_setopt(it, CURLSHoption.CURLSHOPT_SHARE, CURL_LOCK_DATA_CONNECT)
+                curl_share_setopt(it, CURLSHoption.CURLSHOPT_LOCKFUNC, staticCFunction(::shareLock))
+                curl_share_setopt(it, CURLSHoption.CURLSHOPT_UNLOCKFUNC, staticCFunction(::shareUnlock))
+            }
+        }
     }
 
     val headerBuffer = KUrlStringBuffer()
@@ -34,21 +53,9 @@ class KUrl(
     private val memScope = MemScope()
 
     init {
-        /**
-         * Based on:
-         * https://everything.curl.dev/libcurl/sharing
-         * https://everything.curl.dev/libcurl/caches#connection-cache
-         * https://curl.se/libcurl/c/shared-connection-cache.html
-         * https://curl.se/libcurl/c/threaded-shared-conn.html
-         */
-        // TODO: consider implementing additional SSL caching support: https://curl.se/libcurl/c/threaded-ssl.html
+        curl_easy_setopt(curl, CURLOPT_MAXCONNECTS, MAX_CACHED_CONNECTS_COUNT)
         curlShare?.let {
-            val shareLock = staticCFunction(::shareLock)
-            val shareUnlock = staticCFunction(::shareUnlock)
-            curl_easy_setopt(curl, CURLOPT_MAXCONNECTS, MAX_CACHED_CONNECTS_COUNT)
-            curl_share_setopt(it, CURLSHoption.CURLSHOPT_SHARE, CURL_LOCK_DATA_CONNECT)
-            curl_share_setopt(it, CURLSHoption.CURLSHOPT_LOCKFUNC, shareLock)
-            curl_share_setopt(it, CURLSHoption.CURLSHOPT_UNLOCKFUNC, shareUnlock)
+            curl_easy_setopt(curl, CURLOPT_SHARE, it)
         }
         curl_easy_setopt(curl, CURLOPT_URL, url)
         val header = staticCFunction(::headerCallback)
@@ -80,9 +87,6 @@ class KUrl(
             curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headersList)
         }
 
-        curlShare?.let {
-            curl_easy_setopt(curl, CURLOPT_SHARE, it)
-        }
         val res = curl_easy_perform(curl)
         if (headers.isNotEmpty()) {
             curl_slist_free_all(headersList)
