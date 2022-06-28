@@ -4,7 +4,7 @@ import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.readBytes
 
-class KUrlByteArrayBuffer : KUrlResponseDataBuffer {
+internal class KUrlByteArrayBuffer : KUrlResponseDataBuffer {
 
     private var bufferData: ByteArray = ByteArray(0)
 

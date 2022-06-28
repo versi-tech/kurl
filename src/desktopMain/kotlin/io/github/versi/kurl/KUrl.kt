@@ -1,5 +1,6 @@
 package io.github.versi.kurl
 
+import io.github.versi.kurl.buffer.KUrlByteArrayBuffer
 import io.github.versi.kurl.buffer.KUrlResponseDataBuffer
 import io.github.versi.kurl.buffer.KUrlStringBuffer
 import io.github.versi.kurl.curl.*
@@ -11,15 +12,21 @@ private const val MAX_CACHED_CONNECTS_COUNT = 5L
 @SharedImmutable
 private val mutex = KUrlMutex(mutexesCount = CURL_LOCK_DATA_LAST.toInt())
 
+data class KUrlOptions(
+    val userAgent: String? = null,
+    val connectTimeoutSec: Long = 3,
+    val transferTimeoutSec: Long = 12,
+    val withConnectionSharing: Boolean = false,
+    val proxy: String? = null
+)
+
 class KUrl(
     private val url: String,
     val dataBuffer: KUrlResponseDataBuffer,
-    userAgent: String? = null,
-    timeoutInSeconds: Long = 15,
-    withConnectionSharing: Boolean = false
+    options: KUrlOptions = KUrlOptions()
 ) {
 
-    private val curlShare: COpaquePointer? = if (withConnectionSharing) {
+    private val curlShare: COpaquePointer? = if (options.withConnectionSharing) {
         KUrl.curlShare
     } else null
 
@@ -44,9 +51,13 @@ class KUrl(
                 curl_share_setopt(it, CURLSHoption.CURLSHOPT_UNLOCKFUNC, staticCFunction(::shareUnlock))
             }
         }
+
+        fun forBytes(url: String, options: KUrlOptions = KUrlOptions()) = KUrl(url, KUrlByteArrayBuffer(), options)
+
+        fun forString(url: String, options: KUrlOptions = KUrlOptions()) = KUrl(url, KUrlStringBuffer(), options)
     }
 
-    val headerBuffer = KUrlStringBuffer()
+    val headerBuffer: KUrlResponseDataBuffer = KUrlStringBuffer()
 
     private val stableRef = StableRef.create(this)
     private val curl = curl_easy_init()
@@ -65,14 +76,14 @@ class KUrl(
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeData)
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, stableRef.asCPointer())
         curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L)
-        userAgent?.let {
+        options.userAgent?.let {
             curl_easy_setopt(curl, CURLOPT_USERAGENT, it)
         }
-        // by default connect timeout will be 0.2 of timeout
-        val connectTimeout = timeoutInSeconds / 5
-        val transferTimeout = timeoutInSeconds - connectTimeout
-        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, connectTimeout)
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT, transferTimeout)
+        options.proxy?.let {
+            curl_easy_setopt(curl, CURLOPT_PROXY, it)
+        }
+        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, options.connectTimeoutSec)
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, options.transferTimeoutSec)
     }
 
     fun fetch(withoutBody: Boolean = false, headers: List<String> = emptyList()): Any {
@@ -101,6 +112,8 @@ class KUrl(
 
         return dataBuffer.read()
     }
+
+    fun headers() = headerBuffer.read() as String
 
     fun close() {
         curl_easy_cleanup(curl)

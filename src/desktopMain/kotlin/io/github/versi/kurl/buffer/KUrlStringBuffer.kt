@@ -4,7 +4,7 @@ import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.readBytes
 
-class KUrlStringBuffer : KUrlResponseDataBuffer {
+internal class KUrlStringBuffer : KUrlResponseDataBuffer {
 
     private val stringBuffer = StringBuilder()
 
