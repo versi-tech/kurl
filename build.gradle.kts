@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "io.github.versi.kurl"
-version = "0.0.13"
+version = "0.0.13-fix2"
 
 repositories {
     mavenCentral()
