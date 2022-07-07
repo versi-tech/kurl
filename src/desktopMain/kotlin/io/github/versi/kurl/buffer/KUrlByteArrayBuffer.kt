@@ -19,13 +19,9 @@ class KUrlByteArrayBuffer(initialSize: Int = BUFFER_INITIAL_SIZE_IN_BYTES) : KUr
         }
     }
 
-    override fun read(): ByteArray = bufferData
+    override fun read(): ByteArray = bufferData.copyOfRange(0, lastIndex)
 
     private fun increaseBuffer(newSize: Int) {
-        val newBuffer = ByteArray(newSize)
-        for (i in bufferData.indices) {
-            newBuffer[i] = bufferData[i]
-        }
-        bufferData = newBuffer
+        bufferData = bufferData.copyOf(newSize)
     }
 }
