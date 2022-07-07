@@ -107,7 +107,7 @@ class KUrl(
             curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, httpStatusCode.ptr)
             val errorMessage = curl_easy_strerror(res)?.toKStringFromUtf8()
             val httpCode = httpStatusCode.value
-            throw CUrlException("Failed to download content with CUrl from: $url, response code: $httpCode, CUrl code: $res, message: $errorMessage")
+            throwException(url, httpCode, res, errorMessage)
         }
 
         return dataBuffer.read()
@@ -118,6 +118,16 @@ class KUrl(
     fun close() {
         curl_easy_cleanup(curl)
         stableRef.dispose()
+    }
+
+    private fun throwException(url: String, httpCode: Long, curlCode: UInt, errorMessage: String?) {
+        if (curlCode == CURLE_OPERATION_TIMEDOUT) {
+            throw CUrlTimeoutException(url, httpCode, errorMessage)
+        } else if (httpCode == 404L) {
+            throw CUrlNotFoundException(url, httpCode, errorMessage)
+        } else {
+            throw CUrlException(url, httpCode, curlCode, errorMessage)
+        }
     }
 }
 
@@ -177,4 +187,15 @@ fun shareUnlock(
     mutex.unlock(data.toInt())
 }
 
-class CUrlException(override val message: String) : Exception(message)
+open class CUrlException(val url: String, val httpCode: Long, val curlCode: UInt, val errorMessage: String?) :
+    Exception() {
+
+    override val message: String =
+        "Failed to download content with CUrl from: $url, response code: $httpCode, CUrl code: $curlCode, message: $errorMessage"
+}
+
+class CUrlNotFoundException(url: String, httpCode: Long, errorMessage: String?) :
+    CUrlException(url, httpCode, CURLE_HTTP_RETURNED_ERROR, errorMessage)
+
+class CUrlTimeoutException(url: String, httpCode: Long, errorMessage: String?) :
+    CUrlException(url, httpCode, CURLE_OPERATION_TIMEDOUT, errorMessage)
